@@ -41,6 +41,25 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/validation_records")
+def list_validation_records() -> dict:
+    """列出全部采集源接入校验记录；必须声明在 /{entry_id} 之前。"""
+    items = service.list_validation_records()
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/validate_pending")
+def validate_pending_sources() -> dict:
+    """读取待接入采集源记录并逐个校验接入状态，生成采集源接入校验记录。"""
+    records = service.validate_pending_sources()
+    rejected = sum(1 for record in records if record["decision"] == "拒绝确认")
+    return {
+        "ok": True,
+        "message": f"已校验 {len(records)} 条待接入采集源，拒绝确认 {rejected} 条",
+        "items": records,
+    }
+
+
 @router.get("/export")
 def export_entries(
     request: Request,
@@ -96,6 +115,15 @@ def run_action(entry_id: int, payload: ActionPayload) -> ActionResult:
 def validate_connection(entry_id: int) -> dict:
     """触发采集源连接校验。"""
     return service.validate_connection(entry_id)
+
+
+@router.get("/{entry_id}/validation_record")
+def get_validation_record(entry_id: int) -> dict:
+    """读取单条采集源接入校验记录；未生成时给出可读说明。"""
+    record = service.get_validation_record(entry_id)
+    if record is None:
+        return {"ok": False, "message": f"采集源 {entry_id} 暂无接入校验记录", "record": None}
+    return {"ok": True, "record": record}
 
 
 @router.get("/{entry_id}/seeds")

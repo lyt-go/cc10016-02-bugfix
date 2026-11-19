@@ -17,6 +17,7 @@ class Store:
         # 跨模块链路状态存储
         self._pipeline_states: dict[str, Any] = {
             "source_validation_cache": {},   # crawl_source 连接校验缓存
+            "source_access_validation_records": {},  # 采集源接入校验记录（按源id同源存储，重复校验原地更新）
             "cursor_snapshots": {},          # incre_cursor 断点快照
             "dedup_bloom_filters": {},       # dedup_filter 布隆过滤器状态
             "format_pipelines": {},          # format_convert pipeline 运行状态

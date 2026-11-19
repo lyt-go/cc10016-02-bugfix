@@ -2,7 +2,7 @@
   <section class="page" data-module="seed_config">
     <header class="page-head">
       <div>
-        <h2>种子管理管理</h2>
+        <h2>种子管理</h2>
         <p class="page-desc">维护采集种子URL模板与页面结构描述，为种子管理提供可验证的数据工程流程。</p>
       </div>
       <div class="page-actions">
@@ -31,12 +31,17 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>调度状态</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)" :data-testid="`row-${row.id}`" :data-status="String(row.status)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td :data-testid="`schedulable-${row.id}`">
+            <span v-if="row._repair_state === '待修复'" class="repair-flag">待修复：{{ row._repair_reason }}</span>
+            <span v-else>{{ row._schedulable ? '可调度' : '不可调度' }}</span>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -51,7 +56,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无种子管理数据，可先登记采集种子</td>
+          <td :colspan="columns.length + 2" class="empty-state">暂无种子管理数据，可先登记采集种子</td>
         </tr>
       </tbody>
     </table>
@@ -103,7 +108,7 @@ const createValues = ref<Record<string, string>>({})
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
-  { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[statuses.length - 1]).length },
+  { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[2]).length },
 ])
 
 function resetFilters() {
@@ -159,8 +164,9 @@ async function runAction(action: string, row: Row) {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('种子管理动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || '种子管理动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {

@@ -2,11 +2,12 @@
   <section class="page" data-module="crawl_source">
     <header class="page-head">
       <div>
-        <h2>采集源管理管理</h2>
+        <h2>采集源管理</h2>
         <p class="page-desc">维护多源采集接入的注册、连接与状态管理，为数据源接入提供可验证的数据工程流程。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" data-testid="open-create" type="button" @click="openCreate">登记采集源</button>
+        <button class="btn" data-testid="validate-pending" type="button" @click="validatePending">校验待接入源</button>
         <button class="btn" data-testid="export" type="button" @click="exportRows">导出采集源管理清单</button>
       </div>
     </header>
@@ -31,12 +32,14 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>接入校验</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)" :data-testid="`row-${row.id}`" :data-status="String(row.status)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td :data-testid="`validation-${row.id}`">{{ row._validation_decision ?? '未校验' }}</td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -48,13 +51,49 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" :data-testid="`record-${row.id}`" @click="openValidationRecord(row)">
+              校验记录
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无采集源管理数据，可先登记采集源</td>
+          <td :colspan="columns.length + 2" class="empty-state">暂无采集源管理数据，可先登记采集源</td>
         </tr>
       </tbody>
     </table>
+
+    <div v-if="showValidation" class="modal-backdrop" data-testid="validation-panel">
+      <div class="modal">
+        <h3>采集源接入校验记录</h3>
+        <template v-if="validationRecord">
+          <p><strong>记录编号：</strong>{{ validationRecord.record_id }}（数据版本 v{{ validationRecord.version }}）</p>
+          <p><strong>源标识：</strong>{{ validationRecord.源标识 }}　<strong>记录状态：</strong>{{ validationRecord.record_status }}</p>
+          <p><strong>连通结果：</strong>{{ validationRecord.reachable ? '可达' : '不可达' }}（{{ validationRecord.message }}，延迟 {{ validationRecord.latency }}s）</p>
+          <p><strong>接入判定：</strong>{{ validationRecord.decision }}</p>
+          <h4>种子状态数据</h4>
+          <table class="data-table">
+            <thead>
+              <tr><th>种子编号</th><th>种子状态</th><th>修复状态</th><th>调度入口</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="seed in validationRecord.seed_statuses" :key="String(seed.seed_id)">
+                <td>{{ seed.种子编号 }}</td>
+                <td>{{ seed.status }}</td>
+                <td>{{ seed.repair_state || '可用' }}</td>
+                <td>{{ seed.schedulable ? '可调度' : '不可调度' }}</td>
+              </tr>
+              <tr v-if="!validationRecord.seed_statuses?.length">
+                <td colspan="4" class="empty-state">该来源暂未绑定种子</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <p v-else class="empty-state">该采集源暂无接入校验记录，可先执行提交校验或校验待接入源</p>
+        <div class="page-actions">
+          <button class="btn" type="button" data-testid="close-validation" @click="showValidation = false">关闭</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate">
@@ -100,10 +139,12 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const showValidation = ref(false)
+const validationRecord = ref<Record<string, any> | null>(null)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
-  { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[statuses.length - 1]).length },
+  { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[2]).length },
 ])
 
 function resetFilters() {
@@ -159,12 +200,37 @@ async function runAction(action: string, row: Row) {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('采集源管理动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || '采集源管理动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '采集源管理操作失败'
+  }
+}
+
+async function validatePending() {
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/validate_pending`, { method: 'POST' })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) throw new Error(payload.message || '待接入源校验失败')
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '待接入源校验失败'
+  }
+}
+
+async function openValidationRecord(row: Row) {
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}/validation_record`)
+    const payload = await response.json()
+    validationRecord.value = payload.record ?? null
+    showValidation.value = true
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '校验记录读取失败'
   }
 }
 
